@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Web QLab - Mobile & Tablet Responsive Cue Player</title>
+  <style>
+    :root {
+      --bg-dark: #121214;
+      --panel-bg: #1e1e24;
+      --panel-border: #2d2d38;
+      --accent-green: #28a745;
+      --accent-orange: #fd7e14;
+      --accent-red: #dc3545;
+      --accent-blue: #007bff;
+      --text-main: #f0f0f0;
+      --text-muted: #8a8a9e;
+      --selected-bg: #2d3142;
+    }
+
+    * { 
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      padding: 10px;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      touch-action: manipulation;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas: 
+        "waveform waveform"
+        "go panic";
+      gap: 10px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    @media (min-width: 768px) {
+      header {
+        grid-template-columns: 180px 1fr 180px;
+        grid-template-areas: "go waveform panic";
+        height: 120px;
+      }
+    }
+
+    .btn-go {
+      grid-area: go;
+      background-color: var(--accent-green);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 24px;
+      font-weight: 900;
+      cursor: pointer;
+      min-height: 60px;
+      box-shadow: 0 4px 10px rgba(40, 167, 69, 0.3);
+      transition: background-color 0.2s ease;
+    }
+    .btn-go.paused {
+      background-color: var(--accent-orange);
+      box-shadow: 0 4px 10px rgba(253, 126, 20, 0.3);
+    }
+    .btn-go:active { transform: scale(0.97); }
+
+    .btn-panic {
+      grid-area: panic;
+      background-color: var(--accent-red);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      min-height: 60px;
+    }
+    .btn-panic:active { transform: scale(0.97); }
+
+    .waveform-display {
+      grid-area: waveform;
+      background: #0a0a0c;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      position: relative;
+      overflow: hidden;
+      height: 80px;
+      cursor: pointer;
+    }
+    @media (min-width: 768px) {
+      .waveform-display { height: 100%; }
+    }
+
+    canvas { width: 100%; height: 100%; display: block; }
+
+    .time-info {
+      position: absolute;
+      top: 5px;
+      right: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: rgba(0,0,0,0.6);
+      padding: 2px 6px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    .workspace {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+    }
+    @media (min-width: 900px) {
+      .workspace {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+      }
+    }
+
+    .cue-list-panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      min-height: 300px;
+    }
+
+    .drop-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 123, 255, 0.25);
+      border: 3px dashed var(--accent-blue);
+      border-radius: 8px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease-in-out;
+      z-index: 10;
+    }
+
+    .cue-list-panel.drag-over .drop-overlay { opacity: 1; }
+
+    .toolbar {
+      padding: 10px;
+      background: #18181c;
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .file-input-btn, .btn-secondary {
+      background: var(--accent-blue);
+      color: white;
+      padding: 10px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      border: none;
+      display: inline-block;
+      text-align: center;
+    }
+    .btn-secondary { background: #3a3a4c; font-weight: normal; }
+
+    .drop-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      width: 100%;
+    }
+    @media (min-width: 600px) {
+      .drop-hint { width: auto; }
+    }
+
+    .table-wrapper { 
+      flex: 1; 
+      overflow-y: auto; 
+      max-height: 50vh;
+    }
+    @media (min-width: 900px) {
+      .table-wrapper { max-height: none; }
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    th {
+      background: #18181c;
+      padding: 12px 10px;
+      color: var(--text-muted);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    td { 
+      padding: 14px 10px;
+      border-bottom: 1px solid var(--panel-border); 
+    }
+
+    tr.cue-row { cursor: pointer; user-select: none; }
+    tr.cue-row:active { background: #2f2f3e; }
+    tr.cue-row.selected { background: var(--selected-bg); }
+    tr.cue-row.playing { border-left: 4px solid var(--accent-green); background: rgba(40, 167, 69, 0.15); }
+    tr.cue-row.paused { border-left: 4px solid var(--accent-orange); background: rgba(253, 126, 20, 0.15); }
+
+    .inspector-panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .inspector-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 8px;
+      margin: 0;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 12px; color: var(--text-muted); }
+    .form-group input[type="number"], 
+    .form-group input[type="text"] {
+      background: #121214;
+      border: 1px solid var(--panel-border);
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+
+    .form-group input[type="range"] { height: 30px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <button class="btn-go" id="goBtn">GO</button>
+    <div class="waveform-display" id="waveformContainer">
+      <canvas id="waveformCanvas"></canvas>
+      <div class="time-info" id="timeInfo">00:00 / 00:00</div>
+    </div>
+    <button class="btn-panic" id="panicBtn">PANIC</button>
+  </header>
+
+  <div class="workspace">
+    <div class="cue-list-panel" id="dropZone">
+      <div class="drop-overlay">ここに音声ファイルをドロップ</div>
+      
+      <div class="toolbar">
+        <label class="file-input-btn">
+          + 音声ファイルを選択
+          <input type="file" id="audioFileInput" accept="audio/*" multiple style="display:none;">
+        </label>
+        <button class="btn-secondary" id="clearStorageBtn">データ全消去</button>
+        <span class="drop-hint">※PCではドラッグ＆ドロップでも追加可能</span>
+      </div>
+      
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50px;">Cue</th>
+              <th>Target Name</th>
+              <th style="width: 70px;">Start</th>
+              <th style="width: 60px;">In</th>
+              <th style="width: 60px;">Out</th>
+            </tr>
+          </thead>
+          <tbody id="cueTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="inspector-panel">
+      <h3 class="inspector-title">CUE INSPECTOR</h3>
+      <div id="inspectorContent">
+        <p style="color: var(--text-muted); font-size: 13px;">キューを選択してください</p>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // IndexedDB 構築
+  const DB_NAME = 'WebQLabDB_v2';
+  const DB_VERSION = 1;
+  let db = null;
+
+  function initDB() {
+    return new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onupgradeneeded = (e) => {
+        const instance = e.target.result;
+        if (!instance.objectStoreNames.contains('audioBlobs')) {
+          instance.createObjectStore('audioBlobs');
+        }
+      };
+      request.onsuccess = (e) => {
+        db = e.target.result;
+        resolve(db);
+      };
+      request.onerror = (e) => reject(e);
+    });
+  }
+
+  function saveAudioBlob(id, blob) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audioBlobs', 'readwrite');
+      const store = tx.objectStore('audioBlobs');
+      const req = store.put(blob, id.toString());
+      req.onsuccess = () => resolve();
+      req.onerror = (err) => reject(err);
+    });
+  }
+
+  function getAudioBlob(id) {
+    return new Promise((resolve) => {
+      const tx = db.transaction('audioBlobs', 'readonly');
+      const store = tx.objectStore('audioBlobs');
+      const req = store.get(id.toString());
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  }
+
+  function clearDB() {
+    if (!db) return;
+    const tx = db.transaction('audioBlobs', 'readwrite');
+    tx.objectStore('audioBlobs').clear();
+  }
+
+  // Web Audio Context
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function initAudioEngine() {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  const unlockAudio = () => {
+    initAudioEngine();
+    document.removeEventListener('touchstart', unlockAudio);
+    document.
