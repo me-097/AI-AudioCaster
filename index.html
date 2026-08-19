@@ -173,17 +173,21 @@
       justify-content: space-between;
     }
 
+    /* スマホでタップしやすいスタイルへ改善 */
     .file-input-btn, .btn-secondary {
       background: var(--accent-blue);
       color: white;
-      padding: 10px 14px;
+      padding: 12px 16px;
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
       font-weight: bold;
       border: none;
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       text-align: center;
+      user-select: none;
     }
     .btn-secondary { background: #3a3a4c; font-weight: normal; }
 
@@ -283,9 +287,10 @@
       <div class="drop-overlay">ここに音声ファイルをドロップ</div>
       
       <div class="toolbar">
+        <!-- スマホ互換性を高めるため accept 属性を拡張指定 -->
         <label class="file-input-btn">
           + 音声ファイルを選択
-          <input type="file" id="audioFileInput" accept="audio/*" multiple style="display:none;">
+          <input type="file" id="audioFileInput" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.mp4,.mov" multiple style="display:none;">
         </label>
         <button class="btn-secondary" id="clearStorageBtn">データ全消去</button>
         <span class="drop-hint">※PCではドラッグ＆ドロップでも追加可能</span>
@@ -385,7 +390,7 @@
       this.id = id;
       this.name = name;
       this.blob = blob;
-      this.buffer = null; // 必要時にデコードして保持
+      this.buffer = null;
       this.startTime = 0;
       this.fadeIn = 0.0;
       this.fadeOut = 1.0;
@@ -482,7 +487,6 @@
       const finishedIndex = cueList.findIndex(c => c.id === finishedCueId);
       if (finishedIndex !== -1 && finishedIndex < cueList.length - 1) {
         selectedCueIndex = finishedIndex + 1;
-        // 次の曲のバッファを裏でロードしておく
         cueList[selectedCueIndex].loadBuffer();
       }
       renderCueList();
@@ -740,10 +744,8 @@
   dropZone.addEventListener('drop', async (e) => {
     dropZone.classList.remove('drag-over');
     const files = Array.from(e.dataTransfer.files);
-    const audioFiles = files.filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name));
-    
-    if (audioFiles.length > 0) {
-      await processAudioFiles(audioFiles);
+    if (files.length > 0) {
+      await processAudioFiles(files);
     }
   });
 
