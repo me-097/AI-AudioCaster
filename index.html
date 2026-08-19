@@ -316,8 +316,7 @@
   </div>
 
 <script>
-  // IndexedDB 構築
-  const DB_NAME = 'WebQLabDB_v2';
+  const DB_NAME = 'WebQLabDB_v3';
   const DB_VERSION = 1;
   let db = null;
 
@@ -365,35 +364,28 @@
     tx.objectStore('audioBlobs').clear();
   }
 
-  // Web Audio Context
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   let audioCtx = null;
 
   function initAudioEngine() {
-    if (!audioCtx) audioCtx = new AudioContext();
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+    }
     if (audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
   }
-
-  const unlockAudio = () => {
-    initAudioEngine();
-    document.removeEventListener('touchstart', unlockAudio);
-    document.removeEventListener('click', unlockAudio);
-  };
-  document.addEventListener('touchstart', unlockAudio, { once: true });
-  document.addEventListener('click', unlockAudio, { once: true });
 
   let cueList = [];
   let selectedCueIndex = 0;
   let cueCounter = 1;
 
   class Cue {
-    constructor(id, name, blob, audioBuffer) {
+    constructor(id, name, blob) {
       this.id = id;
       this.name = name;
       this.blob = blob;
-      this.buffer = audioBuffer;
+      this.buffer = null; // 必要時にデコードして保持
       this.startTime = 0;
       this.fadeIn = 0.0;
       this.fadeOut = 1.0;
@@ -406,10 +398,35 @@
       this.isPaused = false;
       this.pausedAt = 0;
       this.startedAt = 0;
+      this.isDecoding = false;
     }
 
-    play() {
+    async loadBuffer() {
+      if (this.buffer) return true;
+      if (!this.blob) return false;
+
+      try {
+        this.isDecoding = true;
+        initAudioEngine();
+        const arrayBuffer = await this.blob.arrayBuffer();
+        this.buffer = await audioCtx.decodeAudioData(arrayBuffer);
+        this.isDecoding = false;
+        return true;
+      } catch (err) {
+        console.error("Audio Decode Error:", err);
+        this.isDecoding = false;
+        alert(`音声「${this.name}」の読み込みに失敗しました。ファイル形式を確認してください。`);
+        return false;
+      }
+    }
+
+    async play() {
       initAudioEngine();
+
+      if (!this.buffer) {
+        const loaded = await this.loadBuffer();
+        if (!loaded) return;
+      }
 
       let offset = this.isPaused ? this.pausedAt : this.startTime;
 
@@ -450,7 +467,6 @@
           this.isPlaying = false;
           this.pausedAt = 0;
 
-          // Loop未設定かつ自然終了した場合、次のキューへ選択を移動
           if (!this.loop) {
             this.advanceToNextCue(this.id);
           } else {
@@ -458,12 +474,16 @@
           }
         }
       };
+
+      renderCueList();
     }
 
     advanceToNextCue(finishedCueId) {
       const finishedIndex = cueList.findIndex(c => c.id === finishedCueId);
       if (finishedIndex !== -1 && finishedIndex < cueList.length - 1) {
         selectedCueIndex = finishedIndex + 1;
+        // 次の曲のバッファを裏でロードしておく
+        cueList[selectedCueIndex].loadBuffer();
       }
       renderCueList();
     }
@@ -515,7 +535,7 @@
 
     getCurrentTime() {
       if (this.isPaused) return this.pausedAt;
-      if (!this.isPlaying) return this.startTime;
+      if (!this.isPlaying || !this.buffer) return this.startTime;
 
       const elapsed = audioCtx.currentTime - this.startedAt;
       if (this.loop) {
@@ -528,7 +548,6 @@
     }
   }
 
-  // 波形描画
   function drawWaveform() {
     const canvas = document.getElementById('waveformCanvas');
     const ctx = canvas.getContext('2d');
@@ -627,10 +646,13 @@
 
       tr.className = `cue-row ${index === selectedCueIndex ? 'selected' : ''} ${statusClass}`;
       
-      tr.onclick = () => {
+      tr.onclick = async () => {
+        initAudioEngine();
         if (selectedCueIndex !== index) {
           selectedCueIndex = index;
           renderCueList();
+          await cueList[selectedCueIndex].loadBuffer();
+          drawWaveform();
         }
       };
 
@@ -700,7 +722,6 @@
     renderCueList();
   }
 
-  // ドラッグ＆ドロップ
   const dropZone = document.getElementById('dropZone');
 
   ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -736,26 +757,28 @@
     await initDB();
 
     for (const file of files) {
-      const blob = file;
       const cleanName = getCleanFileName(file);
-      const arrayBuffer = await blob.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      
-      const newCue = new Cue(cueCounter++, cleanName, blob, audioBuffer);
+      const newCue = new Cue(cueCounter++, cleanName, file);
       cueList.push(newCue);
     }
+
     await saveState();
     renderCueList();
+
+    if (cueList.length > 0) {
+      await cueList[selectedCueIndex].loadBuffer();
+      drawWaveform();
+    }
   }
 
   document.getElementById('audioFileInput').addEventListener('change', async (e) => {
+    initAudioEngine();
     const files = Array.from(e.target.files);
     if (files.length > 0) {
       await processAudioFiles(files);
     }
   });
 
-  // 保存・復元
   async function saveState() {
     await initDB();
     const serialized = cueList.map(cue => ({
@@ -767,8 +790,8 @@
       volume: cue.volume,
       loop: cue.loop
     }));
-    localStorage.setItem('webqlab_cues_v2', JSON.stringify(serialized));
-    localStorage.setItem('webqlab_counter_v2', cueCounter);
+    localStorage.setItem('webqlab_cues_v3', JSON.stringify(serialized));
+    localStorage.setItem('webqlab_counter_v3', cueCounter);
 
     for (const cue of cueList) {
       if (cue.blob) {
@@ -779,8 +802,8 @@
 
   async function loadState() {
     await initDB();
-    const savedMeta = localStorage.getItem('webqlab_cues_v2');
-    const savedCounter = localStorage.getItem('webqlab_counter_v2');
+    const savedMeta = localStorage.getItem('webqlab_cues_v3');
+    const savedCounter = localStorage.getItem('webqlab_counter_v3');
 
     if (!savedMeta) return;
 
@@ -790,25 +813,23 @@
     for (const item of parsed) {
       const blob = await getAudioBlob(item.id);
       if (blob) {
-        try {
-          initAudioEngine();
-          const arrayBuffer = await blob.arrayBuffer();
-          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-          
-          const cue = new Cue(item.id, item.name, blob, audioBuffer);
-          cue.startTime = item.startTime || 0;
-          cue.fadeIn = item.fadeIn;
-          cue.fadeOut = item.fadeOut;
-          cue.volume = item.volume;
-          cue.loop = item.loop;
+        const cue = new Cue(item.id, item.name, blob);
+        cue.startTime = item.startTime || 0;
+        cue.fadeIn = item.fadeIn;
+        cue.fadeOut = item.fadeOut;
+        cue.volume = item.volume;
+        cue.loop = item.loop;
 
-          cueList.push(cue);
-        } catch(e) {
-          console.error("Audio decode error:", e);
-        }
+        cueList.push(cue);
       }
     }
+
     renderCueList();
+
+    if (cueList.length > 0) {
+      await cueList[0].loadBuffer();
+      drawWaveform();
+    }
   }
 
   document.getElementById('clearStorageBtn').addEventListener('click', () => {
@@ -822,17 +843,16 @@
     }
   });
 
-  // GOボタンの挙動
-  function triggerGo() {
+  async function triggerGo() {
+    initAudioEngine();
     if (cueList.length === 0) return;
     const currentCue = cueList[selectedCueIndex];
 
     if (currentCue.isPlaying) {
       currentCue.pause();
     } else {
-      currentCue.play();
+      await currentCue.play();
     }
-    renderCueList();
   }
 
   function stopAll() {
